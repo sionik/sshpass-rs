@@ -42,6 +42,7 @@ fn main() -> Result<()> {
             _ = "password:" => {
                 if let Some(password) = password {
                     ssh.send_line(password)?;
+                    ssh.expect("\n")?;
                 } else {
                     print!("password:")
                 }
