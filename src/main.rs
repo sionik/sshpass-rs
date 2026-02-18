@@ -42,7 +42,7 @@ fn main() -> Result<()> {
             _ = "(yes/no/[fingerprint])" => {
                 ssh.send_line("yes")?;
             },
-            _ = "password:" => {
+            _ = "assword:" => {
                 if let Some(password) = password {
                     ssh.send_line(password)?;
                 } else {
