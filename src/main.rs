@@ -4,7 +4,7 @@ use console::Term;
 use expectrl::{check, spawn, stream::stdin::Stdin, Error};
 use std::{env, io::stdout};
 
-/// A sshpass implementation in Rust 
+/// A sshpass implementation in Rust
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -17,7 +17,6 @@ struct Args {
     /// SSH command that runs
     #[arg(last = true)]
     command: Vec<String>,
-    
     // TODO: Take password to use from file
     // #[arg(short, long)]
     // file: Option<String>,
@@ -28,13 +27,11 @@ fn main() -> Result<()> {
     let command = args.command.join(" ");
     let password = if let Some(password) = args.password {
         Some(password)
-    } else if let Ok(password) = env::var(args.env) {
-        Some(password)
     } else {
-        None
+        env::var(args.env).ok()
     };
 
-    let mut ssh = spawn(&command).expect(&format!("Unknown command: {:?}", command));
+    let mut ssh = spawn(&command).unwrap_or_else(|_| panic!("Unknown command: {:?}", command));
 
     loop {
         match check!(
