@@ -25,6 +25,9 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.command.is_empty() {
+        anyhow::bail!("No command specified. Usage: sshpass-rs [OPTIONS] -- <COMMAND>");
+    }
     let command = args.command.join(" ");
     let password = if let Some(password) = args.password {
         Some(password)
