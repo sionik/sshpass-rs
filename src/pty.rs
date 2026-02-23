@@ -1,4 +1,4 @@
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,6 +9,9 @@ use crate::matcher::Matcher;
 const RETURN_INCORRECT_PASSWORD: i32 = 5;
 const RETURN_HOST_KEY_UNKNOWN: i32 = 6;
 const RETURN_HOST_KEY_CHANGED: i32 = 7;
+
+type SharedWriter = Arc<Mutex<Option<Box<dyn Write + Send>>>>;
+type SharedMaster = Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
@@ -60,14 +63,12 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
         .try_clone_reader()
         .map_err(|e| PtyError::ReaderFailed(e.to_string()))?;
 
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|e| PtyError::WriterFailed(e.to_string()))?;
-
-    let writer = Arc::new(Mutex::new(writer));
-    #[allow(unused_variables)]
-    let master = Arc::new(Mutex::new(pair.master));
+    let writer: SharedWriter = Arc::new(Mutex::new(Some(
+        pair.master
+            .take_writer()
+            .map_err(|e| PtyError::WriterFailed(e.to_string()))?,
+    )));
+    let master: SharedMaster = Arc::new(Mutex::new(Some(pair.master)));
     let exit_code = Arc::new(AtomicI32::new(0));
 
     #[cfg(unix)]
@@ -78,10 +79,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
     {
         let w = Arc::clone(&writer);
         let _ = ctrlc::set_handler(move || {
-            if let Ok(mut w) = w.lock() {
-                let _ = w.write_all(b"\x03");
-                let _ = w.flush();
-            }
+            write_to_pty(&w, b"\x03");
         });
     }
 
@@ -91,14 +89,16 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
         let verbose = config.verbose;
         let exit_code = Arc::clone(&exit_code);
         let writer = Arc::clone(&writer);
+        let master = Arc::clone(&master);
 
         thread::spawn(move || {
+            let mut stdout = std::io::stdout();
             let mut pw_matcher = Matcher::new(&prompt);
             let mut hk_matcher = Matcher::new("The authenticity of host ");
             let mut hkc_matcher =
                 Matcher::new("differs from the key for the IP address");
             let mut password_sent = false;
-            let mut buf = [0u8; 256];
+            let mut buf = [0u8; 4096];
 
             if verbose {
                 eprintln!(
@@ -119,16 +119,16 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                             );
                         }
 
+                        let _ = stdout.write_all(data);
+                        let _ = stdout.flush();
+
                         if pw_matcher.feed(data) {
                             if !password_sent {
                                 if verbose {
                                     eprintln!("SSHPASS: detected prompt. Sending password.");
                                 }
-                                if let Ok(mut w) = writer.lock() {
-                                    let payload = format!("{}\n", password);
-                                    let _ = w.write_all(payload.as_bytes());
-                                    let _ = w.flush();
-                                }
+                                let payload = format!("{}\n", password);
+                                write_to_pty(&writer, payload.as_bytes());
                                 password_sent = true;
                                 pw_matcher.reset();
                             } else {
@@ -139,6 +139,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                                     RETURN_INCORRECT_PASSWORD,
                                     Ordering::SeqCst,
                                 );
+                                close_pty(&writer, &master);
                                 break;
                             }
                         }
@@ -151,6 +152,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                                 RETURN_HOST_KEY_UNKNOWN,
                                 Ordering::SeqCst,
                             );
+                            close_pty(&writer, &master);
                             break;
                         }
 
@@ -159,6 +161,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                                 RETURN_HOST_KEY_CHANGED,
                                 Ordering::SeqCst,
                             );
+                            close_pty(&writer, &master);
                             break;
                         }
                     }
@@ -188,10 +191,29 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
     }
 }
 
+fn write_to_pty(writer: &SharedWriter, data: &[u8]) {
+    if let Ok(mut guard) = writer.lock() {
+        if let Some(ref mut w) = *guard {
+            let _ = w.write_all(data);
+            let _ = w.flush();
+        }
+    }
+}
+
+fn close_pty(writer: &SharedWriter, master: &SharedMaster) {
+    if let Ok(mut w) = writer.lock() {
+        w.take();
+    }
+    if let Ok(mut m) = master.lock() {
+        m.take();
+    }
+}
+
 #[cfg(unix)]
 fn get_terminal_size() -> Option<PtySize> {
     unsafe {
-        let mut ws = std::mem::MaybeUninit::<libc::winsize>::zeroed().assume_init();
+        let mut ws =
+            std::mem::MaybeUninit::<libc::winsize>::zeroed().assume_init();
         if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0 {
             Some(PtySize {
                 rows: ws.ws_row,
@@ -212,8 +234,8 @@ fn get_terminal_size() -> Option<PtySize> {
 
 #[cfg(unix)]
 fn setup_unix_signals(
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    writer: SharedWriter,
+    master: SharedMaster,
 ) -> Option<signal_hook::iterator::backend::Handle> {
     use signal_hook::consts::*;
     use signal_hook::iterator::Signals;
@@ -225,22 +247,14 @@ fn setup_unix_signals(
     thread::spawn(move || {
         for sig in signals.forever() {
             match sig {
-                SIGINT => {
-                    if let Ok(mut w) = writer.lock() {
-                        let _ = w.write_all(b"\x03");
-                        let _ = w.flush();
-                    }
-                }
-                SIGTSTP => {
-                    if let Ok(mut w) = writer.lock() {
-                        let _ = w.write_all(b"\x1a");
-                        let _ = w.flush();
-                    }
-                }
+                SIGINT => write_to_pty(&writer, b"\x03"),
+                SIGTSTP => write_to_pty(&writer, b"\x1a"),
                 SIGWINCH => {
                     if let Some(size) = get_terminal_size() {
                         if let Ok(m) = master.lock() {
-                            let _ = m.resize(size);
+                            if let Some(ref m) = *m {
+                                let _ = m.resize(size);
+                            }
                         }
                     }
                 }

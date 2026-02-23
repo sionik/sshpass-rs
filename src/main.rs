@@ -26,7 +26,7 @@ struct Cli {
     password: Option<String>,
 
     /// Password is passed as env-var (default: SSHPASS)
-    #[arg(short = 'e', value_name = "env_var", num_args = 0..=1, default_missing_value = DEFAULT_ENV_VAR)]
+    #[arg(short = 'e', value_name = "env_var", num_args = 0..=1, default_missing_value = DEFAULT_ENV_VAR, require_equals = true)]
     env: Option<String>,
 
     /// Take password to use from file
