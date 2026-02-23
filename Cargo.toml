@@ -1,20 +1,17 @@
 [package]
 name = "sshpass-rs"
 version = "0.1.0"
-authors = ["fantasyzhjk <fantasyzhjk@outlook.com>"]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/fantasyzhjk/sshpass-rs"
-homepage = "https://github.com/fantasyzhjk/sshpass-rs"
-keywords = ["expect", "ssh", "terminal", "automation"]
-readme = "README.md"
-description = "A sshpass implementation in Rust"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A cross-platform sshpass implementation in Rust"
+keywords = ["ssh", "password", "terminal", "automation"]
 
 [dependencies]
-expectrl = "0.6.0"
-console = "0.15.1"
-clap = { version = "4.0.4", features = ["derive"] }
-anyhow = "1.0.65"
-cfg-if = "1.0.0"
+portable-pty = "0.9"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+anyhow = "1"
+ctrlc = "3"
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
