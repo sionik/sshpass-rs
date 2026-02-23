@@ -346,6 +346,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ctrlc",
+ "libc",
  "portable-pty",
  "signal-hook",
  "thiserror 2.0.18",
