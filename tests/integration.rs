@@ -1,6 +1,7 @@
+use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::Once;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const CONTAINER_NAME: &str = "sshpass-rs-test-sshd";
 const SSH_PORT: &str = "2222";
@@ -278,5 +279,119 @@ fn exit_code_from_remote_command_is_forwarded() {
         Some(42),
         "expected exit code 42 from remote command, got: {:?}",
         output.status.code()
+    );
+}
+
+#[test]
+fn stdin_is_forwarded_to_remote() {
+    ensure_container();
+
+    let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
+    args.extend(ssh_args());
+    args.push("head".into());
+    args.push("-1".into());
+
+    let mut child = Command::new(sshpass_bin())
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn sshpass");
+
+    let mut stdin = child.stdin.take().unwrap();
+
+    std::thread::sleep(Duration::from_secs(2));
+
+    stdin.write_all(b"stdin_test\n").unwrap();
+    stdin.flush().unwrap();
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("failed to wait");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("stdin_test"),
+        "expected 'stdin_test' in stdout, got: {}",
+        stdout
+    );
+    assert_eq!(output.status.code(), Some(0));
+}
+
+#[test]
+fn ctrl_c_terminates_remote_command() {
+    ensure_container();
+
+    let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
+    args.extend(ssh_args());
+    args.push("sleep".into());
+    args.push("30".into());
+
+    let start = Instant::now();
+
+    let mut child = Command::new(sshpass_bin())
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn sshpass");
+
+    let mut stdin = child.stdin.take().unwrap();
+
+    std::thread::sleep(Duration::from_secs(2));
+
+    stdin.write_all(b"\x03").unwrap();
+    stdin.flush().unwrap();
+    drop(stdin);
+
+    let _output = child.wait_with_output().expect("failed to wait");
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "expected quick exit after Ctrl+C, took {:?}",
+        elapsed
+    );
+}
+
+#[test]
+fn ctrl_d_closes_session() {
+    ensure_container();
+
+    let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
+    args.extend(ssh_args());
+
+    let start = Instant::now();
+
+    let mut child = Command::new(sshpass_bin())
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn sshpass");
+
+    let mut stdin = child.stdin.take().unwrap();
+
+    std::thread::sleep(Duration::from_secs(2));
+
+    stdin.write_all(b"\x04").unwrap();
+    stdin.flush().unwrap();
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("failed to wait");
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "expected quick exit after Ctrl+D, took {:?}",
+        elapsed
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected clean exit after Ctrl+D, got: {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
