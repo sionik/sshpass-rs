@@ -71,6 +71,8 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
     let master: SharedMaster = Arc::new(Mutex::new(Some(pair.master)));
     let exit_code = Arc::new(AtomicI32::new(0));
 
+    let _raw_guard = RawModeGuard::enter();
+
     #[cfg(unix)]
     let _signal_handle =
         setup_unix_signals(Arc::clone(&writer), Arc::clone(&master));
@@ -82,6 +84,21 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
             write_to_pty(&w, b"\x03");
         });
     }
+
+    let stdin_handle = {
+        let writer = Arc::clone(&writer);
+        thread::spawn(move || {
+            let mut stdin = std::io::stdin();
+            let mut buf = [0u8; 1024];
+            loop {
+                match stdin.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => write_to_pty(&writer, &buf[..n]),
+                    Err(_) => break,
+                }
+            }
+        })
+    };
 
     let read_handle = {
         let password = config.password;
@@ -179,6 +196,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
     }
 
     let _ = read_handle.join();
+    drop(stdin_handle);
 
     let sshpass_code = exit_code.load(Ordering::SeqCst);
     if sshpass_code != 0 {
@@ -232,23 +250,65 @@ fn get_terminal_size() -> Option<PtySize> {
     None
 }
 
+struct RawModeGuard {
+    #[cfg(unix)]
+    original: Option<libc::termios>,
+}
+
+impl RawModeGuard {
+    fn enter() -> Self {
+        #[cfg(unix)]
+        {
+            let original = unsafe {
+                let mut termios = std::mem::MaybeUninit::<libc::termios>::zeroed()
+                    .assume_init();
+                if libc::isatty(libc::STDIN_FILENO) != 0
+                    && libc::tcgetattr(libc::STDIN_FILENO, &mut termios) == 0
+                {
+                    let original = termios;
+                    libc::cfmakeraw(&mut termios);
+                    libc::tcsetattr(
+                        libc::STDIN_FILENO,
+                        libc::TCSANOW,
+                        &termios,
+                    );
+                    Some(original)
+                } else {
+                    None
+                }
+            };
+            Self { original }
+        }
+        #[cfg(not(unix))]
+        Self {}
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(ref original) = self.original {
+            unsafe {
+                libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, original);
+            }
+        }
+    }
+}
+
 #[cfg(unix)]
 fn setup_unix_signals(
-    writer: SharedWriter,
+    _writer: SharedWriter,
     master: SharedMaster,
 ) -> Option<signal_hook::iterator::backend::Handle> {
     use signal_hook::consts::*;
     use signal_hook::iterator::Signals;
 
-    let mut signals =
-        Signals::new([SIGINT, SIGTSTP, SIGWINCH, SIGTERM, SIGHUP]).ok()?;
+    let mut signals = Signals::new([SIGWINCH, SIGTERM, SIGHUP]).ok()?;
     let handle = signals.handle();
 
     thread::spawn(move || {
         for sig in signals.forever() {
             match sig {
-                SIGINT => write_to_pty(&writer, b"\x03"),
-                SIGTSTP => write_to_pty(&writer, b"\x1a"),
                 SIGWINCH => {
                     if let Some(size) = get_terminal_size() {
                         if let Ok(m) = master.lock() {
