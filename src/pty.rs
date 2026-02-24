@@ -117,6 +117,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
             let mut password_sent = false;
             let mut forwarding = false;
             let mut skip_until_newline = false;
+            let mut pre_auth_buf = Vec::new();
             let mut buf = [0u8; 4096];
 
             if verbose {
@@ -147,6 +148,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                                 write_to_pty(&writer, payload.as_bytes());
                                 password_sent = true;
                                 skip_until_newline = true;
+                                pre_auth_buf.clear();
                                 pw_matcher.reset();
                             } else {
                                 if verbose {
@@ -196,10 +198,17 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                                     let _ = stdout.flush();
                                 }
                             }
+                        } else {
+                            pre_auth_buf.extend_from_slice(data);
                         }
                     }
                     Err(_) => break,
                 }
+            }
+
+            if !forwarding && !pre_auth_buf.is_empty() {
+                let _ = stdout.write_all(&pre_auth_buf);
+                let _ = stdout.flush();
             }
         })
     };
@@ -283,6 +292,7 @@ impl RawModeGuard {
                 {
                     let original = termios;
                     libc::cfmakeraw(&mut termios);
+                    termios.c_lflag |= libc::ISIG;
                     libc::tcsetattr(
                         libc::STDIN_FILENO,
                         libc::TCSANOW,
@@ -313,13 +323,14 @@ impl Drop for RawModeGuard {
 
 #[cfg(unix)]
 fn setup_unix_signals(
-    _writer: SharedWriter,
+    writer: SharedWriter,
     master: SharedMaster,
 ) -> Option<signal_hook::iterator::backend::Handle> {
     use signal_hook::consts::*;
     use signal_hook::iterator::Signals;
 
-    let mut signals = Signals::new([SIGWINCH, SIGTERM, SIGHUP]).ok()?;
+    let mut signals =
+        Signals::new([SIGWINCH, SIGTERM, SIGHUP, SIGINT, SIGTSTP]).ok()?;
     let handle = signals.handle();
 
     thread::spawn(move || {
@@ -334,6 +345,8 @@ fn setup_unix_signals(
                         }
                     }
                 }
+                SIGINT => write_to_pty(&writer, b"\x03"),
+                SIGTSTP => write_to_pty(&writer, b"\x1a"),
                 SIGTERM | SIGHUP => break,
                 _ => {}
             }
