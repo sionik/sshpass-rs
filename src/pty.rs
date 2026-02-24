@@ -115,9 +115,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
             let mut hkc_matcher =
                 Matcher::new("differs from the key for the IP address");
             let mut password_sent = false;
-            let mut forwarding = false;
-            let mut skip_until_newline = false;
-            let mut pre_auth_buf = Vec::new();
+            let mut suppress_until_newline = false;
             let mut buf = [0u8; 4096];
 
             if verbose {
@@ -147,8 +145,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                                 let payload = format!("{}\n", password);
                                 write_to_pty(&writer, payload.as_bytes());
                                 password_sent = true;
-                                skip_until_newline = true;
-                                pre_auth_buf.clear();
+                                suppress_until_newline = true;
                                 pw_matcher.reset();
                             } else {
                                 if verbose {
@@ -184,14 +181,11 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                             break;
                         }
 
-                        if forwarding {
-                            let _ = stdout.write_all(data);
-                            let _ = stdout.flush();
-                        } else if skip_until_newline {
+                        if suppress_until_newline {
                             if let Some(pos) =
                                 data.iter().position(|&b| b == b'\n')
                             {
-                                forwarding = true;
+                                suppress_until_newline = false;
                                 let remaining = &data[pos + 1..];
                                 if !remaining.is_empty() {
                                     let _ = stdout.write_all(remaining);
@@ -199,16 +193,12 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                                 }
                             }
                         } else {
-                            pre_auth_buf.extend_from_slice(data);
+                            let _ = stdout.write_all(data);
+                            let _ = stdout.flush();
                         }
                     }
                     Err(_) => break,
                 }
-            }
-
-            if !forwarding && !pre_auth_buf.is_empty() {
-                let _ = stdout.write_all(&pre_auth_buf);
-                let _ = stdout.flush();
             }
         })
     };
