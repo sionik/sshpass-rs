@@ -355,6 +355,35 @@ fn ctrl_c_terminates_remote_command() {
 }
 
 #[test]
+fn password_prompt_is_not_leaked_to_stdout() {
+    ensure_container();
+
+    let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
+    args.extend(ssh_args());
+    args.push("echo".into());
+    args.push("hello".into());
+
+    let output = Command::new(sshpass_bin())
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("failed to run sshpass");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("assword"),
+        "password prompt leaked to stdout: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains(TEST_PASS),
+        "password leaked to stdout: {}",
+        stdout
+    );
+}
+
+#[test]
 fn ctrl_d_closes_session() {
     ensure_container();
 

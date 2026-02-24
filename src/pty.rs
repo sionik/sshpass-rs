@@ -115,6 +115,8 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
             let mut hkc_matcher =
                 Matcher::new("differs from the key for the IP address");
             let mut password_sent = false;
+            let mut forwarding = false;
+            let mut skip_until_newline = false;
             let mut buf = [0u8; 4096];
 
             if verbose {
@@ -136,9 +138,6 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                             );
                         }
 
-                        let _ = stdout.write_all(data);
-                        let _ = stdout.flush();
-
                         if pw_matcher.feed(data) {
                             if !password_sent {
                                 if verbose {
@@ -147,6 +146,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                                 let payload = format!("{}\n", password);
                                 write_to_pty(&writer, payload.as_bytes());
                                 password_sent = true;
+                                skip_until_newline = true;
                                 pw_matcher.reset();
                             } else {
                                 if verbose {
@@ -180,6 +180,22 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                             );
                             close_pty(&writer, &master);
                             break;
+                        }
+
+                        if forwarding {
+                            let _ = stdout.write_all(data);
+                            let _ = stdout.flush();
+                        } else if skip_until_newline {
+                            if let Some(pos) =
+                                data.iter().position(|&b| b == b'\n')
+                            {
+                                forwarding = true;
+                                let remaining = &data[pos + 1..];
+                                if !remaining.is_empty() {
+                                    let _ = stdout.write_all(remaining);
+                                    let _ = stdout.flush();
+                                }
+                            }
                         }
                     }
                     Err(_) => break,
