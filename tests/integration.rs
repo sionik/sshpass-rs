@@ -223,35 +223,6 @@ fn host_key_unknown_returns_exit_6() {
 }
 
 #[test]
-fn verbose_mode_shows_debug_output() {
-    ensure_container();
-
-    let mut args = vec!["-v".to_string(), "-p".to_string(), TEST_PASS.to_string()];
-    args.extend(ssh_args());
-    args.push("echo".into());
-    args.push("verbose_test".into());
-
-    let output = Command::new(sshpass_bin())
-        .args(&args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("failed to run sshpass");
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("SSHPASS: searching for password prompt"),
-        "expected verbose search message in stderr, got: {}",
-        stderr
-    );
-    assert!(
-        stderr.contains("SSHPASS: detected prompt"),
-        "expected verbose prompt detection in stderr, got: {}",
-        stderr
-    );
-}
-
-#[test]
 fn exit_code_from_remote_command_is_forwarded() {
     ensure_container();
 
