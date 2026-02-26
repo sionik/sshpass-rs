@@ -165,10 +165,7 @@ fn file_password_works() {
     let pw_file = std::env::temp_dir().join("sshpass_test_integration_pw");
     std::fs::write(&pw_file, format!("{}\n", TEST_PASS)).unwrap();
 
-    let mut args = vec![
-        "-f".to_string(),
-        pw_file.to_string_lossy().to_string(),
-    ];
+    let mut args = vec!["-f".to_string(), pw_file.to_string_lossy().to_string()];
     args.extend(ssh_args());
     args.push("echo".into());
     args.push("file_works".into());
@@ -229,11 +226,7 @@ fn host_key_unknown_returns_exit_6() {
 fn verbose_mode_shows_debug_output() {
     ensure_container();
 
-    let mut args = vec![
-        "-v".to_string(),
-        "-p".to_string(),
-        TEST_PASS.to_string(),
-    ];
+    let mut args = vec!["-v".to_string(), "-p".to_string(), TEST_PASS.to_string()];
     args.extend(ssh_args());
     args.push("echo".into());
     args.push("verbose_test".into());

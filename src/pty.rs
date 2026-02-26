@@ -1,4 +1,4 @@
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -74,8 +74,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
     let _raw_guard = RawModeGuard::enter();
 
     #[cfg(unix)]
-    let _signal_handle =
-        setup_unix_signals(Arc::clone(&writer), Arc::clone(&master));
+    let _signal_handle = setup_unix_signals(Arc::clone(&writer), Arc::clone(&master));
 
     #[cfg(not(unix))]
     {
@@ -112,8 +111,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
             let mut stdout = std::io::stdout();
             let mut pw_matcher = Matcher::new(&prompt);
             let mut hk_matcher = Matcher::new("The authenticity of host ");
-            let mut hkc_matcher =
-                Matcher::new("differs from the key for the IP address");
+            let mut hkc_matcher = Matcher::new("differs from the key for the IP address");
             let mut password_sent = false;
             let mut suppress_until_newline = false;
             let mut buf = [0u8; 4096];
@@ -131,10 +129,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                     Ok(n) => {
                         let data = &buf[..n];
                         if verbose {
-                            eprintln!(
-                                "SSHPASS: read: {}",
-                                String::from_utf8_lossy(data)
-                            );
+                            eprintln!("SSHPASS: read: {}", String::from_utf8_lossy(data));
                         }
 
                         if pw_matcher.feed(data) {
@@ -149,12 +144,11 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                                 pw_matcher.reset();
                             } else {
                                 if verbose {
-                                    eprintln!("SSHPASS: detected prompt, again. Wrong password. Terminating.");
+                                    eprintln!(
+                                        "SSHPASS: detected prompt, again. Wrong password. Terminating."
+                                    );
                                 }
-                                exit_code.store(
-                                    RETURN_INCORRECT_PASSWORD,
-                                    Ordering::SeqCst,
-                                );
+                                exit_code.store(RETURN_INCORRECT_PASSWORD, Ordering::SeqCst);
                                 close_pty(&writer, &master);
                                 break;
                             }
@@ -164,27 +158,19 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                             if verbose {
                                 eprintln!("SSHPASS: detected host authentication prompt. Exiting.");
                             }
-                            exit_code.store(
-                                RETURN_HOST_KEY_UNKNOWN,
-                                Ordering::SeqCst,
-                            );
+                            exit_code.store(RETURN_HOST_KEY_UNKNOWN, Ordering::SeqCst);
                             close_pty(&writer, &master);
                             break;
                         }
 
                         if hkc_matcher.feed(data) {
-                            exit_code.store(
-                                RETURN_HOST_KEY_CHANGED,
-                                Ordering::SeqCst,
-                            );
+                            exit_code.store(RETURN_HOST_KEY_CHANGED, Ordering::SeqCst);
                             close_pty(&writer, &master);
                             break;
                         }
 
                         if suppress_until_newline {
-                            if let Some(pos) =
-                                data.iter().position(|&b| b == b'\n')
-                            {
+                            if let Some(pos) = data.iter().position(|&b| b == b'\n') {
                                 suppress_until_newline = false;
                                 let remaining = &data[pos + 1..];
                                 if !remaining.is_empty() {
@@ -245,8 +231,7 @@ fn close_pty(writer: &SharedWriter, master: &SharedMaster) {
 #[cfg(unix)]
 fn get_terminal_size() -> Option<PtySize> {
     unsafe {
-        let mut ws =
-            std::mem::MaybeUninit::<libc::winsize>::zeroed().assume_init();
+        let mut ws = std::mem::MaybeUninit::<libc::winsize>::zeroed().assume_init();
         if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0 {
             Some(PtySize {
                 rows: ws.ws_row,
@@ -275,19 +260,14 @@ impl RawModeGuard {
         #[cfg(unix)]
         {
             let original = unsafe {
-                let mut termios = std::mem::MaybeUninit::<libc::termios>::zeroed()
-                    .assume_init();
+                let mut termios = std::mem::MaybeUninit::<libc::termios>::zeroed().assume_init();
                 if libc::isatty(libc::STDIN_FILENO) != 0
                     && libc::tcgetattr(libc::STDIN_FILENO, &mut termios) == 0
                 {
                     let original = termios;
                     libc::cfmakeraw(&mut termios);
                     termios.c_lflag |= libc::ISIG;
-                    libc::tcsetattr(
-                        libc::STDIN_FILENO,
-                        libc::TCSANOW,
-                        &termios,
-                    );
+                    libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &termios);
                     Some(original)
                 } else {
                     None
@@ -319,8 +299,7 @@ fn setup_unix_signals(
     use signal_hook::consts::*;
     use signal_hook::iterator::Signals;
 
-    let mut signals =
-        Signals::new([SIGWINCH, SIGTERM, SIGHUP, SIGINT, SIGTSTP]).ok()?;
+    let mut signals = Signals::new([SIGWINCH, SIGTERM, SIGHUP, SIGINT, SIGTSTP]).ok()?;
     let handle = signals.handle();
 
     thread::spawn(move || {
