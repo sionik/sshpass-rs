@@ -86,7 +86,8 @@ mod tests {
 
     #[test]
     fn env_password() {
-        std::env::set_var("SSHPASS_TEST_VAR", "envpass");
+        // SAFETY: This test runs in isolation; no other threads access this env var.
+        unsafe { std::env::set_var("SSHPASS_TEST_VAR", "envpass") };
         let source = PasswordSource::Env("SSHPASS_TEST_VAR".into());
         assert_eq!(resolve_password(&source).unwrap(), "envpass");
         assert!(std::env::var("SSHPASS_TEST_VAR").is_err());
