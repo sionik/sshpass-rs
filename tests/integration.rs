@@ -1,91 +1,45 @@
+mod ssh_server;
+
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::sync::Once;
 use std::time::{Duration, Instant};
 
-const CONTAINER_NAME: &str = "sshpass-rs-test-sshd";
-const SSH_PORT: &str = "2222";
 const TEST_USER: &str = "testuser";
 const TEST_PASS: &str = "testpass123";
 const WRONG_PASS: &str = "wrongpassword";
-
-static CONTAINER_INIT: Once = Once::new();
 
 fn sshpass_bin() -> String {
     let mut path = std::env::current_exe().unwrap();
     path.pop(); // remove test binary name
     path.pop(); // remove "deps"
-    path.push("sshpass-rs");
+    if cfg!(windows) {
+        path.push("sshpass-rs.exe");
+    } else {
+        path.push("sshpass-rs");
+    }
     path.to_string_lossy().to_string()
 }
 
-fn ensure_container() {
-    CONTAINER_INIT.call_once(|| {
-        let inspect = Command::new("podman")
-            .args(["inspect", CONTAINER_NAME])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-
-        if inspect.is_ok() && inspect.unwrap().success() {
-            let _ = Command::new("podman")
-                .args(["start", CONTAINER_NAME])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-            std::thread::sleep(Duration::from_secs(1));
-            return;
-        }
-
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let dockerfile = format!("{}/tests/Dockerfile.sshd", manifest_dir);
-
-        let image_name = "sshpass-rs-test-sshd:latest";
-        let build_status = Command::new("podman")
-            .args(["build", "-t", image_name, "-f", &dockerfile, "."])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .expect("failed to build container image");
-        assert!(build_status.success(), "container image build failed");
-
-        let run_status = Command::new("podman")
-            .args([
-                "run",
-                "-d",
-                "--name",
-                CONTAINER_NAME,
-                "-p",
-                &format!("{}:22", SSH_PORT),
-                image_name,
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .expect("failed to start container");
-        assert!(run_status.success(), "container start failed");
-
-        std::thread::sleep(Duration::from_secs(2));
-    });
+fn null_device() -> &'static str {
+    if cfg!(windows) { "NUL" } else { "/dev/null" }
 }
 
 fn ssh_args() -> Vec<String> {
+    let port = ssh_server::ensure_server().port;
     vec![
         "ssh".into(),
         "-o".into(),
         "StrictHostKeyChecking=no".into(),
         "-o".into(),
-        "UserKnownHostsFile=/dev/null".into(),
+        format!("UserKnownHostsFile={}", null_device()),
         "-p".into(),
-        SSH_PORT.into(),
+        port.to_string(),
         format!("{}@127.0.0.1", TEST_USER),
     ]
 }
 
 #[test]
 fn correct_password_runs_command() {
-    ensure_container();
-
     let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
     args.extend(ssh_args());
     args.push("echo".into());
@@ -109,8 +63,6 @@ fn correct_password_runs_command() {
 
 #[test]
 fn wrong_password_returns_exit_5() {
-    ensure_container();
-
     let mut args = vec!["-p".to_string(), WRONG_PASS.to_string()];
     args.extend(ssh_args());
     args.push("echo".into());
@@ -134,8 +86,6 @@ fn wrong_password_returns_exit_5() {
 
 #[test]
 fn env_password_works() {
-    ensure_container();
-
     let mut args = ssh_args();
     args.insert(0, "-e".to_string());
     args.push("echo".into());
@@ -160,8 +110,6 @@ fn env_password_works() {
 
 #[test]
 fn file_password_works() {
-    ensure_container();
-
     let pw_file = std::env::temp_dir().join("sshpass_test_integration_pw");
     std::fs::write(&pw_file, format!("{}\n", TEST_PASS)).unwrap();
 
@@ -190,17 +138,16 @@ fn file_password_works() {
 
 #[test]
 fn host_key_unknown_returns_exit_6() {
-    ensure_container();
-
+    let port = ssh_server::ensure_server().port;
     let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
     args.extend(vec![
         "ssh".into(),
         "-o".into(),
         "StrictHostKeyChecking=ask".into(),
         "-o".into(),
-        "UserKnownHostsFile=/dev/null".into(),
+        format!("UserKnownHostsFile={}", null_device()),
         "-p".into(),
-        SSH_PORT.into(),
+        port.to_string(),
         format!("{}@127.0.0.1", TEST_USER),
         "echo".into(),
         "hello".into(),
@@ -224,8 +171,6 @@ fn host_key_unknown_returns_exit_6() {
 
 #[test]
 fn exit_code_from_remote_command_is_forwarded() {
-    ensure_container();
-
     let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
     args.extend(ssh_args());
     args.push("exit".into());
@@ -248,8 +193,6 @@ fn exit_code_from_remote_command_is_forwarded() {
 
 #[test]
 fn stdin_is_forwarded_to_remote() {
-    ensure_container();
-
     let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
     args.extend(ssh_args());
     args.push("head".into());
@@ -283,8 +226,6 @@ fn stdin_is_forwarded_to_remote() {
 
 #[test]
 fn ctrl_c_terminates_remote_command() {
-    ensure_container();
-
     let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
     args.extend(ssh_args());
     args.push("sleep".into());
@@ -320,8 +261,6 @@ fn ctrl_c_terminates_remote_command() {
 
 #[test]
 fn password_is_not_leaked_to_stdout() {
-    ensure_container();
-
     let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
     args.extend(ssh_args());
     args.push("echo".into());
@@ -344,8 +283,6 @@ fn password_is_not_leaked_to_stdout() {
 
 #[test]
 fn ctrl_d_closes_session() {
-    ensure_container();
-
     let mut args = vec!["-p".to_string(), TEST_PASS.to_string()];
     args.extend(ssh_args());
 
