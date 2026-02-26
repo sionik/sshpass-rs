@@ -5,10 +5,7 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error)]
 pub enum PasswordError {
     #[error("failed to open password file \"{path}\": {source}")]
-    FileOpen {
-        path: PathBuf,
-        source: io::Error,
-    },
+    FileOpen { path: PathBuf, source: io::Error },
     #[error("environment variable \"{var}\" is not set")]
     EnvNotSet { var: String },
     #[error("failed to read password from stdin: {0}")]
@@ -32,10 +29,10 @@ pub fn resolve_password(source: &PasswordSource) -> Result<String, PasswordError
     match source {
         PasswordSource::Direct(pw) => Ok(pw.clone()),
         PasswordSource::Env(var) => {
-            let pw = std::env::var(var).map_err(|_| PasswordError::EnvNotSet {
-                var: var.clone(),
-            })?;
-            std::env::remove_var(var);
+            let pw =
+                std::env::var(var).map_err(|_| PasswordError::EnvNotSet { var: var.clone() })?;
+            // SAFETY: We are single-threaded at this point
+            unsafe { std::env::remove_var(var) };
             Ok(pw)
         }
         PasswordSource::File(path) => {
