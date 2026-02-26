@@ -17,8 +17,7 @@ const EXIT_RUNTIME_ERROR: i32 = 3;
 #[command(
     name = "sshpass",
     about = "Non-interactive ssh password authentication",
-    version,
-    override_usage = "sshpass [-f|-d|-p|-e[env_var]] [-hV] command parameters"
+    version
 )]
 struct Cli {
     /// Provide password as argument (security unwise)
@@ -41,10 +40,6 @@ struct Cli {
     /// Which string sshpass searches for to detect a password prompt
     #[arg(short = 'P', value_name = "prompt", default_value = DEFAULT_PROMPT)]
     prompt: String,
-
-    /// Be verbose about what you're doing
-    #[arg(short = 'v', action = clap::ArgAction::Count)]
-    verbose: u8,
 
     /// Command and arguments to run
     #[arg(trailing_var_arg = true, required = true)]
@@ -76,13 +71,12 @@ fn run() -> i32 {
         command: cli.command,
         password,
         prompt: cli.prompt,
-        verbose: cli.verbose > 0,
     };
 
     match pty::run(config) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("SSHPASS: {e}");
+            eprintln!("PTY error: {e}");
             EXIT_RUNTIME_ERROR
         }
     }

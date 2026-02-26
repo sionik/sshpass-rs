@@ -29,7 +29,6 @@ pub struct RunConfig {
     pub command: Vec<String>,
     pub password: String,
     pub prompt: String,
-    pub verbose: bool,
 }
 
 pub fn run(config: RunConfig) -> Result<i32, PtyError> {
@@ -102,7 +101,6 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
     let read_handle = {
         let password = config.password;
         let prompt = config.prompt;
-        let verbose = config.verbose;
         let exit_code = Arc::clone(&exit_code);
         let writer = Arc::clone(&writer);
         let master = Arc::clone(&master);
@@ -116,38 +114,20 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
             let mut suppress_until_newline = false;
             let mut buf = [0u8; 4096];
 
-            if verbose {
-                eprintln!(
-                    "SSHPASS: searching for password prompt using match \"{}\"",
-                    prompt
-                );
-            }
-
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
                         let data = &buf[..n];
-                        if verbose {
-                            eprintln!("SSHPASS: read: {}", String::from_utf8_lossy(data));
-                        }
 
                         if pw_matcher.feed(data) {
                             if !password_sent {
-                                if verbose {
-                                    eprintln!("SSHPASS: detected prompt. Sending password.");
-                                }
                                 let payload = format!("{}\n", password);
                                 write_to_pty(&writer, payload.as_bytes());
                                 password_sent = true;
                                 suppress_until_newline = true;
                                 pw_matcher.reset();
                             } else {
-                                if verbose {
-                                    eprintln!(
-                                        "SSHPASS: detected prompt, again. Wrong password. Terminating."
-                                    );
-                                }
                                 exit_code.store(RETURN_INCORRECT_PASSWORD, Ordering::SeqCst);
                                 close_pty(&writer, &master);
                                 break;
@@ -155,9 +135,6 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
                         }
 
                         if hk_matcher.feed(data) {
-                            if verbose {
-                                eprintln!("SSHPASS: detected host authentication prompt. Exiting.");
-                            }
                             exit_code.store(RETURN_HOST_KEY_UNKNOWN, Ordering::SeqCst);
                             close_pty(&writer, &master);
                             break;
@@ -212,10 +189,11 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
 
 fn write_to_pty(writer: &SharedWriter, data: &[u8]) {
     if let Ok(mut guard) = writer.lock()
-        && let Some(ref mut w) = *guard {
-            let _ = w.write_all(data);
-            let _ = w.flush();
-        }
+        && let Some(ref mut w) = *guard
+    {
+        let _ = w.write_all(data);
+        let _ = w.flush();
+    }
 }
 
 fn close_pty(writer: &SharedWriter, master: &SharedMaster) {
@@ -307,9 +285,10 @@ fn setup_unix_signals(
                 SIGWINCH => {
                     if let Some(size) = get_terminal_size()
                         && let Ok(m) = master.lock()
-                            && let Some(ref m) = *m {
-                                let _ = m.resize(size);
-                            }
+                        && let Some(ref m) = *m
+                    {
+                        let _ = m.resize(size);
+                    }
                 }
                 SIGINT => write_to_pty(&writer, b"\x03"),
                 SIGTSTP => write_to_pty(&writer, b"\x1a"),
