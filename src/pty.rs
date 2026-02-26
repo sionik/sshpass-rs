@@ -16,13 +16,13 @@ type SharedMaster = Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>;
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
     #[error("failed to open pseudo terminal: {0}")]
-    OpenFailed(String),
+    Open(String),
     #[error("failed to spawn command: {0}")]
-    SpawnFailed(String),
+    Spawn(String),
     #[error("failed to get pty reader: {0}")]
-    ReaderFailed(String),
+    Reader(String),
     #[error("failed to get pty writer: {0}")]
-    WriterFailed(String),
+    Writer(String),
 }
 
 pub struct RunConfig {
@@ -44,7 +44,7 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
 
     let pair = pty_system
         .openpty(initial_size)
-        .map_err(|e| PtyError::OpenFailed(e.to_string()))?;
+        .map_err(|e| PtyError::Open(e.to_string()))?;
 
     let mut cmd = CommandBuilder::new(&config.command[0]);
     for arg in &config.command[1..] {
@@ -54,19 +54,19 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
     let mut child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| PtyError::SpawnFailed(e.to_string()))?;
+        .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
     drop(pair.slave);
 
     let mut reader = pair
         .master
         .try_clone_reader()
-        .map_err(|e| PtyError::ReaderFailed(e.to_string()))?;
+        .map_err(|e| PtyError::Reader(e.to_string()))?;
 
     let writer: SharedWriter = Arc::new(Mutex::new(Some(
         pair.master
             .take_writer()
-            .map_err(|e| PtyError::WriterFailed(e.to_string()))?,
+            .map_err(|e| PtyError::Writer(e.to_string()))?,
     )));
     let master: SharedMaster = Arc::new(Mutex::new(Some(pair.master)));
     let exit_code = Arc::new(AtomicI32::new(0));
@@ -211,12 +211,11 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
 }
 
 fn write_to_pty(writer: &SharedWriter, data: &[u8]) {
-    if let Ok(mut guard) = writer.lock() {
-        if let Some(ref mut w) = *guard {
+    if let Ok(mut guard) = writer.lock()
+        && let Some(ref mut w) = *guard {
             let _ = w.write_all(data);
             let _ = w.flush();
         }
-    }
 }
 
 fn close_pty(writer: &SharedWriter, master: &SharedMaster) {
@@ -306,13 +305,11 @@ fn setup_unix_signals(
         for sig in signals.forever() {
             match sig {
                 SIGWINCH => {
-                    if let Some(size) = get_terminal_size() {
-                        if let Ok(m) = master.lock() {
-                            if let Some(ref m) = *m {
+                    if let Some(size) = get_terminal_size()
+                        && let Ok(m) = master.lock()
+                            && let Some(ref m) = *m {
                                 let _ = m.resize(size);
                             }
-                        }
-                    }
                 }
                 SIGINT => write_to_pty(&writer, b"\x03"),
                 SIGTSTP => write_to_pty(&writer, b"\x1a"),
