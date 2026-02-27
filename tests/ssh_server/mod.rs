@@ -72,6 +72,12 @@ struct SshHandler {
 impl Handler for SshHandler {
     type Error = russh::Error;
 
+    async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
+        Ok(Reject {
+            proceed_with_methods: Some(MethodSet::PASSWORD),
+        })
+    }
+
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
         if user == TEST_USER && password == TEST_PASS {
             Ok(Auth::Accept)
