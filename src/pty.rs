@@ -173,6 +173,10 @@ pub fn run(config: RunConfig) -> Result<i32, PtyError> {
         handle.close();
     }
 
+    // Close the PTY so the reader thread gets EOF. On Windows,
+    // ConPTY does not reliably signal EOF after the child exits.
+    close_pty(&writer, &master);
+
     let _ = read_handle.join();
     drop(stdin_handle);
 
