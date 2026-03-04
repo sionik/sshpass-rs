@@ -13,12 +13,7 @@ const DEFAULT_ENV_VAR: &str = "SSHPASS";
 const EXIT_RUNTIME_ERROR: i32 = 3;
 
 #[derive(Parser)]
-#[command(
-    name = "sshpass-rs",
-    about = "Non-interactive ssh password authentication",
-    version,
-    author
-)]
+#[command(about, version, author)]
 struct Cli {
     /// Provide password as argument (security unwise)
     #[arg(short = 'p', value_name = "password")]
